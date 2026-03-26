@@ -1,0 +1,23 @@
+# =============================================================================
+# AXLerate REST Middleware - Python Dependencies
+# =============================================================================
+
+# FastAPI and ASGI server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# HTTP client libraries
+httpx==0.25.2
+requests==2.31.0
+
+# SOAP client library
+zeep==4.2.1
+
+# Data validation
+pydantic==2.5.0
+
+# CORS support
+python-multipart==0.0.6
+
+# Development and logging
+python-dotenv==1.0.0

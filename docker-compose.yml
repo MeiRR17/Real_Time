@@ -1,0 +1,477 @@
+# =============================================================================
+# Telephony Load Monitoring System - Docker Compose Configuration
+# =============================================================================
+# This file orchestrates all services of the Telephony Load Monitoring System:
+#   1. Multiple PostgreSQL databases - Separate databases for each component
+#   2. Redis - Caching layer for Superset
+#   3. Mock Server - Simulates Cisco UCCX and CUCM endpoints
+#   4. Proxy Gateway - Collects metrics and stores in PostgreSQL
+#   5. Superset - Apache Superset for dashboards and visualization
+# =============================================================================
+# =============================================================================
+# Services Definition
+# =============================================================================
+services:
+
+  # ===========================================================================
+  # Service 1: CUCM Database
+  # ===========================================================================
+  cucm-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-cucm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cucm_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - cucm_postgres_data:/var/lib/postgresql/data
+      - ./postgres/cucm-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 2: UCCX Database
+  # ===========================================================================
+  uccx-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-uccx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: uccx_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - uccx_postgres_data:/var/lib/postgresql/data
+      - ./postgres/uccx-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 3: CMS Database
+  # ===========================================================================
+  cms-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-cms-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: cms_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - cms_postgres_data:/var/lib/postgresql/data
+      - ./postgres/cms-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 4: IMP Database
+  # ===========================================================================
+  imp-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-imp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: imp_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - imp_postgres_data:/var/lib/postgresql/data
+      - ./postgres/imp-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5436:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 5: Meeting Place Database
+  # ===========================================================================
+  meeting-place-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-meeting-place-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: meeting_place_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - meeting_place_postgres_data:/var/lib/postgresql/data
+      - ./postgres/meeting-place-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5437:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 6: TGW Database
+  # ===========================================================================
+  tgw-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-tgw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: tgw_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - tgw_postgres_data:/var/lib/postgresql/data
+      - ./postgres/tgw-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5438:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 7: SBC Database
+  # ===========================================================================
+  sbc-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-sbc-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: sbc_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - sbc_postgres_data:/var/lib/postgresql/data
+      - ./postgres/sbc-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5439:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 8: Expressway Database
+  # ===========================================================================
+  expressway-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-expressway-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: expressway_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - expressway_postgres_data:/var/lib/postgresql/data
+      - ./postgres/expressway-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5440:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 9: Superset Database
+  # ===========================================================================
+  superset-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-superset-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: superset_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - superset_postgres_data:/var/lib/postgresql/data
+      - ./postgres/superset-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5441:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 10: Redis Cache
+  # ===========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: telephony-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 11: Mock Cisco Server
+  # ===========================================================================
+  mock-server:
+    build:
+      context: ./mock-server
+      dockerfile: Dockerfile
+    container_name: telephony-mock-server
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: info
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 12: AXLerate REST Middleware
+  # ===========================================================================
+  axlerate:
+    build:
+      context: ./AXLerate
+      dockerfile: Dockerfile
+    container_name: telephony-axlerate
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: 1
+      LOG_LEVEL: info
+      # AXL Configuration
+      AXL_USER: ${AXL_USER:-admin}
+      AXL_PASSWORD: ${AXL_PASSWORD:-password}
+      AXL_PORT: ${AXL_PORT:-8443}
+      AXL_VERIFY_SSL: ${AXL_VERIFY_SSL:-false}
+      # Performance Monitoring
+      PERFMON_TIMEOUT: ${PERFMON_TIMEOUT:-30}
+      PERFMON_RETRIES: ${PERFMON_RETRIES:-3}
+    ports:
+      - "8002:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 13: Proxy Gateway
+  # ===========================================================================
+  proxy-gateway:
+    build:
+      context: ./proxy-gateway
+      dockerfile: Dockerfile
+    container_name: telephony-proxy-gateway
+    restart: unless-stopped
+    environment:
+      MOCK_SERVER_URL: http://mock-server:8001
+      AXLERATE_URL: http://axlerate:8000
+      ENABLE_POLLING: "true"
+      POLLING_INTERVAL: "60"
+      REQUEST_TIMEOUT: "10"
+      PYTHONUNBUFFERED: 1
+      
+      # Multi-Database Configuration
+      CUCM_PRIMARY_URL: postgresql://postgres:password@cucm-postgres:5432/cucm_db
+      UCCX_PRIMARY_URL: postgresql://postgres:password@uccx-postgres:5432/uccx_db
+      CMS_PRIMARY_URL: postgresql://postgres:password@cms-postgres:5432/cms_db
+      IMP_PRIMARY_URL: postgresql://postgres:password@imp-postgres:5432/imp_db
+      MEETING_PLACE_PRIMARY_URL: postgresql://postgres:password@meeting-place-postgres:5432/meeting_place_db
+      TGW_PRIMARY_URL: postgresql://postgres:password@tgw-postgres:5432/tgw_db
+      SBC_PRIMARY_URL: postgresql://postgres:password@sbc-postgres:5432/sbc_db
+      EXPRESSWAY_PRIMARY_URL: postgresql://postgres:password@expressway-postgres:5432/expressway_db
+      
+      # Cisco Component Configuration
+      TGW_HOST: ${TGW_HOST:-localhost}
+      TGW_SNMP_COMMUNITY: ${TGW_SNMP_COMMUNITY:-public}
+      TGW_SNMP_PORT: ${TGW_SNMP_PORT:-161}
+      TGW_SNMP_VERSION: ${TGW_SNMP_VERSION:-2c}
+      TGW_SNMP_TIMEOUT: ${TGW_SNMP_TIMEOUT:-5}
+      USE_REAL_TGW: ${USE_REAL_TGW:-false}
+      
+      SBC_HOST: ${SBC_HOST:-localhost}
+      SBC_USERNAME: ${SBC_USERNAME:-}
+      SBC_PASSWORD: ${SBC_PASSWORD:-}
+      SBC_PORT: ${SBC_PORT:-443}
+      SBC_VERIFY_SSL: ${SBC_VERIFY_SSL:-false}
+      SBC_API_VERSION: ${SBC_API_VERSION:-v1}
+      USE_REAL_SBC: ${USE_REAL_SBC:-false}
+      
+      EXPRESSWAY_HOST: ${EXPRESSWAY_HOST:-localhost}
+      EXPRESSWAY_USERNAME: ${EXPRESSWAY_USERNAME:-}
+      EXPRESSWAY_PASSWORD: ${EXPRESSWAY_PASSWORD:-}
+      EXPRESSWAY_PORT: ${EXPRESSWAY_PORT:-443}
+      EXPRESSWAY_VERIFY_SSL: ${EXPRESSWAY_VERIFY_SSL:-false}
+      EXPRESSWAY_API_VERSION: ${EXPRESSWAY_API_VERSION:-v1}
+      USE_REAL_EXPRESSWAY: ${USE_REAL_EXPRESSWAY:-false}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - cucm-postgres
+      - uccx-postgres
+      - cms-postgres
+      - imp-postgres
+      - meeting-place-postgres
+      - tgw-postgres
+      - sbc-postgres
+      - expressway-postgres
+      - mock-server
+      - axlerate
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - telephony-network
+
+  # ===========================================================================
+  # Service 13: Apache Superset
+  # ===========================================================================
+  superset:
+    build: ./superset
+    container_name: telephony-superset
+    restart: unless-stopped
+    environment:
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      SUPERSET_PRIMARY_URL: postgresql://postgres:password@superset-postgres:5432/superset_db
+      REDIS_URL: redis://redis:6379/0
+      SECRET_KEY: your-super-secret-key-change-in-production
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/superset-init.sh:/app/superset-init.sh:ro
+      - superset_data:/app/superset_home
+    command: ["/app/superset-init.sh"]
+    ports:
+      - "8088:8088"
+    depends_on:
+      superset-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - telephony-network
+
+  # =============================================================================
+# Named Volumes for Data Persistence
+# =============================================================================
+volumes:
+  # Component-specific PostgreSQL data directories
+  cucm_postgres_data:
+    driver: local
+  
+  uccx_postgres_data:
+    driver: local
+  
+  cms_postgres_data:
+    driver: local
+  
+  imp_postgres_data:
+    driver: local
+  
+  meeting_place_postgres_data:
+    driver: local
+  
+  tgw_postgres_data:
+    driver: local
+  
+  sbc_postgres_data:
+    driver: local
+  
+  expressway_postgres_data:
+    driver: local
+  
+  superset_postgres_data:
+    driver: local
+  
+  # Redis data directory
+  redis_data:
+    driver: local
+  
+  # Superset home directory (uploads, exports)
+  superset_data:
+    driver: local
+
+# =============================================================================
+# Docker Networks
+# =============================================================================
+networks:
+  # Custom bridge network for service communication
+  telephony-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
