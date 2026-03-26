@@ -32,12 +32,6 @@ from models import (
     DatabaseSession
 )
 
-# Import mock generators for multi-node support
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from mock_generators import create_generators
-
 # =============================================================================
 # Logging Configuration
 # =============================================================================
@@ -85,7 +79,6 @@ SessionLocal = None
 polling_task = None
 last_collection_time = None
 metrics_collected_count = 0
-generators = []  # List of generators for all nodes
 
 # =============================================================================
 # Application Lifespan (Startup/Shutdown Events)
@@ -105,7 +98,7 @@ async def lifespan(app: FastAPI):
         - Cancel background polling task
         - Close database connections
     """
-    global engine, SessionLocal, polling_task, generators
+    global engine, SessionLocal, polling_task
     
     # ===========================
     # STARTUP
@@ -123,13 +116,6 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database schema...")
     init_database(engine)
     logger.info("Database schema ready")
-    
-    # Initialize generators for all nodes
-    logger.info("Initializing generators for all configured nodes...")
-    generators = create_generators()
-    logger.info(f"Created {len(generators)} generators for multi-node collection")
-    for generator in generators:
-        logger.info(f"  - {generator.server_config.name} ({generator.server_config.ip_address})")
     
     # Start background polling if enabled
     if ENABLE_POLLING:
@@ -213,7 +199,7 @@ def get_db() -> Session:
 
 def fetch_uccx_metrics() -> List[Dict[str, Any]]:
     """
-    Fetch metrics from UCCX server (mock or real based on feature toggle).
+    Fetch metrics from UCCX server with deep agent-level segmentation.
     
     Returns:
         List of metric dictionaries ready for database insertion.
@@ -221,38 +207,61 @@ def fetch_uccx_metrics() -> List[Dict[str, Any]]:
     Raises:
         requests.RequestException: If the API call fails.
     """
-    if settings.use_real_uccx:
-        # Use real UCCX generator
-        from real_generators import UCCXRealGenerator
-        generator = UCCXRealGenerator(settings)
-        metrics_data = generator.generate_metrics()
-        server_type = metrics_data.get("server_type", "uccx")
-        metrics = metrics_data.get("metrics", {})
-    else:
-        # Use mock UCCX generator
-        from mock_generators import UCCXMockGenerator
-        generator = UCCXMockGenerator(settings)
-        metrics_data = generator.generate_metrics()
-        server_type = metrics_data.get("server_type", "uccx")
-        metrics = metrics_data.get("metrics", {})
-    
-    # Transform nested metrics into flat records
-    flat_metrics = []
-    for metric_name, metric_info in metrics.items():
-        flat_metrics.append({
-            "server_type": server_type,
-            "metric_name": metric_name,
-            "metric_value": metric_info["value"],
-            "unit": metric_info["unit"]
-        })
-    
-    logger.debug(f"Fetched {len(flat_metrics)} UCCX metrics")
-    return flat_metrics
+    try:
+        response = requests.get(f"{MOCK_SERVER_URL}/api/uccx/stats", timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        
+        metrics = []
+        server_name = "UCCX-Server-1"
+        server_ip = "192.168.1.100"
+        
+        # Process regular metrics
+        for metric_name, metric_info in data["metrics"].items():
+            if metric_name != "agent_states":  # Skip complex nested data for now
+                metrics.append({
+                    "server_type": "uccx",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": metric_name,
+                    "metric_value": str(metric_info["value"]),
+                    "unit": metric_info["unit"]
+                })
+        
+        # Process agent states with extension segmentation
+        if "agent_states" in data["metrics"]:
+            for agent_state in data["metrics"]["agent_states"]["value"]:
+                metrics.append({
+                    "server_type": "uccx",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "agent_state",
+                    "metric_value": agent_state["state"],
+                    "unit": "state",
+                    "extension": agent_state["extension"]
+                })
+                
+                metrics.append({
+                    "server_type": "uccx",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "agent_active_duration",
+                    "metric_value": str(agent_state["active_duration_seconds"]),
+                    "unit": "seconds",
+                    "extension": agent_state["extension"]
+                })
+        
+        logger.debug(f"Fetched {len(metrics)} UCCX metrics")
+        return metrics
+        
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch UCCX metrics: {str(e)}")
+        raise
 
 
 def fetch_cucm_metrics() -> List[Dict[str, Any]]:
     """
-    Fetch metrics from CUCM server (mock or real based on feature toggle).
+    Fetch metrics from CUCM server with phone registration segmentation.
     
     Returns:
         List of metric dictionaries ready for database insertion.
@@ -260,38 +269,77 @@ def fetch_cucm_metrics() -> List[Dict[str, Any]]:
     Raises:
         requests.RequestException: If the API call fails.
     """
-    if settings.use_real_cucm:
-        # Use real CUCM generator
-        from real_generators import CUCMRealGenerator
-        generator = CUCMRealGenerator(settings)
-        metrics_data = generator.generate_metrics()
-        server_type = metrics_data.get("server_type", "cucm")
-        metrics = metrics_data.get("metrics", {})
-    else:
-        # Use mock CUCM generator
-        from mock_generators import CUCMMockGenerator
-        generator = CUCMMockGenerator(settings)
-        metrics_data = generator.generate_metrics()
-        server_type = metrics_data.get("server_type", "cucm")
-        metrics = metrics_data.get("metrics", {})
-    
-    # Transform nested metrics into flat records
-    flat_metrics = []
-    for metric_name, metric_info in metrics.items():
-        flat_metrics.append({
-            "server_type": server_type,
-            "metric_name": metric_name,
-            "metric_value": metric_info["value"],
-            "unit": metric_info["unit"]
-        })
-    
-    logger.debug(f"Fetched {len(flat_metrics)} CUCM metrics")
-    return flat_metrics
+    try:
+        response = requests.get(f"{MOCK_SERVER_URL}/api/cucm/system/stats", timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        
+        metrics = []
+        server_name = "CUCM-Server-1"
+        server_ip = "192.168.1.101"
+        
+        # Process regular metrics
+        for metric_name, metric_info in data["metrics"].items():
+            if metric_name != "phone_breakdown":  # Skip complex nested data for now
+                metrics.append({
+                    "server_type": "cucm",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": metric_name,
+                    "metric_value": str(metric_info["value"]),
+                    "unit": metric_info["unit"]
+                })
+        
+        # Process phone breakdown with location and prefix segmentation
+        if "phone_breakdown" in data["metrics"]:
+            for phone_data in data["metrics"]["phone_breakdown"]["value"]:
+                location_base = phone_data["location_base"]
+                prefix = phone_data["prefix"]
+                
+                metrics.append({
+                    "server_type": "cucm",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "registered_phone_count",
+                    "metric_value": str(phone_data["registered_phone_count"]),
+                    "unit": "count",
+                    "location_base": location_base,
+                    "prefix": prefix
+                })
+                
+                metrics.append({
+                    "server_type": "cucm",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "active_phone_count",
+                    "metric_value": str(phone_data["active_phone_count"]),
+                    "unit": "count",
+                    "location_base": location_base,
+                    "prefix": prefix
+                })
+                
+                metrics.append({
+                    "server_type": "cucm",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "avg_call_volume_today",
+                    "metric_value": str(phone_data["avg_call_volume_today"]),
+                    "unit": "count",
+                    "location_base": location_base,
+                    "prefix": prefix
+                })
+        
+        logger.debug(f"Fetched {len(metrics)} CUCM metrics")
+        return metrics
+        
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch CUCM metrics: {str(e)}")
+        raise
 
 
 def fetch_tgw_metrics() -> List[Dict[str, Any]]:
     """
-    Fetch metrics from TGW router (mock or real based on feature toggle).
+    Fetch metrics from TGW router with destination network segmentation.
     
     Returns:
         List of metric dictionaries ready for database insertion.
@@ -299,33 +347,125 @@ def fetch_tgw_metrics() -> List[Dict[str, Any]]:
     Raises:
         requests.RequestException: If the API call fails.
     """
-    if settings.use_real_tgw:
-        # Use real TGW generator
-        from real_generators import TGWRealGenerator
-        generator = TGWRealGenerator(settings)
-        metrics_data = generator.generate_metrics()
-        server_type = metrics_data.get("server_type", "tgw")
-        metrics = metrics_data.get("metrics", {})
-    else:
-        # Use mock TGW generator
-        from mock_generators import TGWMockGenerator
-        generator = TGWMockGenerator(settings)
-        metrics_data = generator.generate_metrics()
-        server_type = metrics_data.get("server_type", "tgw")
-        metrics = metrics_data.get("metrics", {})
+    try:
+        response = requests.get(f"{MOCK_SERVER_URL}/api/tgw/stats", timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        
+        metrics = []
+        server_name = "TGW-Router-1"
+        server_ip = "192.168.1.102"
+        
+        # Process regular metrics
+        for metric_name, metric_info in data["metrics"].items():
+            if metric_name != "destination_networks":  # Skip complex nested data for now
+                metrics.append({
+                    "server_type": "tgw",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": metric_name,
+                    "metric_value": str(metric_info["value"]),
+                    "unit": metric_info["unit"]
+                })
+        
+        # Process destination network breakdown
+        if "destination_networks" in data["metrics"]:
+            for dest_data in data["metrics"]["destination_networks"]["value"]:
+                dest_network = dest_data["destination_network"]
+                
+                metrics.append({
+                    "server_type": "tgw",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "active_calls_by_destination",
+                    "metric_value": str(dest_data["active_calls"]),
+                    "unit": "count",
+                    "destination_network": dest_network
+                })
+                
+                metrics.append({
+                    "server_type": "tgw",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "bandwidth_by_destination",
+                    "metric_value": str(dest_data["bandwidth_mbps"]),
+                    "unit": "mbps",
+                    "destination_network": dest_network
+                })
+        
+        logger.debug(f"Fetched {len(metrics)} TGW metrics")
+        return metrics
+        
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch TGW metrics: {str(e)}")
+        raise
+
+
+def fetch_cms_metrics() -> List[Dict[str, Any]]:
+    """
+    Fetch metrics from CMS server with participant segmentation.
     
-    # Transform nested metrics into flat records
-    flat_metrics = []
-    for metric_name, metric_info in metrics.items():
-        flat_metrics.append({
-            "server_type": server_type,
-            "metric_name": metric_name,
-            "metric_value": metric_info["value"],
-            "unit": metric_info["unit"]
-        })
+    Returns:
+        List of metric dictionaries ready for database insertion.
     
-    logger.debug(f"Fetched {len(flat_metrics)} TGW metrics")
-    return flat_metrics
+    Raises:
+        requests.RequestException: If the API call fails.
+    """
+    try:
+        response = requests.get(f"{MOCK_SERVER_URL}/api/cms/stats", timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        data = response.json()
+        
+        metrics = []
+        server_name = "CMS-Server-1"
+        server_ip = "192.168.1.103"
+        
+        # Process regular metrics
+        for metric_name, metric_info in data["metrics"].items():
+            if metric_name != "participant_breakdown":  # Skip complex nested data for now
+                metrics.append({
+                    "server_type": "cms",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": metric_name,
+                    "metric_value": str(metric_info["value"]),
+                    "unit": metric_info["unit"]
+                })
+        
+        # Process participant breakdown with location and device type segmentation
+        if "participant_breakdown" in data["metrics"]:
+            for participant_data in data["metrics"]["participant_breakdown"]["value"]:
+                location_base = participant_data["location_base"]
+                device_type = participant_data["device_type"]
+                
+                metrics.append({
+                    "server_type": "cms",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "participant_count_by_location_device",
+                    "metric_value": str(participant_data["participant_count"]),
+                    "unit": "count",
+                    "location_base": location_base,
+                    "device_type": device_type
+                })
+                
+                metrics.append({
+                    "server_type": "cms",
+                    "server_name": server_name,
+                    "server_ip": server_ip,
+                    "metric_name": "bandwidth_usage_by_location_device",
+                    "metric_value": str(participant_data["bandwidth_usage_mbps"]),
+                    "unit": "mbps",
+                    "location_base": location_base,
+                    "device_type": device_type
+                })
+        
+        logger.debug(f"Fetched {len(metrics)} CMS metrics")
+        return metrics
+        
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch CMS metrics: {str(e)}")
+        raise
 
 
 def fetch_sbc_metrics() -> List[Dict[str, Any]]:
@@ -440,18 +580,17 @@ def save_metrics_to_database(metrics: List[Dict[str, Any]]) -> int:
 
 def collect_all_metrics() -> Dict[str, Any]:
     """
-    Collect metrics from all configured nodes and save to database.
+    Collect metrics from all configured servers and save to database.
     
-    This is the main collection orchestrator that:
-    1. Iterates through all node generators
-    2. Generates metrics for each individual node
-    3. Saves all metrics to database with proper server identification
-    4. Returns summary of collection results
+    This function orchestrates the collection of segmented metrics from:
+    - UCCX (Contact Center) with agent extension tracking
+    - CUCM (Communications Manager) with phone location/prefix tracking
+    - TGW (Trunk Gateway) with destination network tracking
+    - CMS (Meeting Server) with participant location/device tracking
     
     Returns:
         Dictionary with collection results including:
         - success: Boolean indicating overall success
-        - node_count: Number of nodes processed
         - total_saved: Total metrics saved to database
         - errors: List of any errors encountered
         - timestamp: ISO format timestamp of collection
@@ -460,35 +599,27 @@ def collect_all_metrics() -> Dict[str, Any]:
     
     errors = []
     all_metrics = []
-    node_count = 0
     
-    logger.info("Starting multi-node metrics collection cycle...")
+    logger.info("Starting segmented metrics collection cycle...")
     
-    # Collect metrics from each node generator
-    for generator in generators:
+    # Define fetch functions for all components
+    fetch_functions = [
+        ("UCCX", fetch_uccx_metrics),
+        ("CUCM", fetch_cucm_metrics),
+        ("TGW", fetch_tgw_metrics),
+        ("CMS", fetch_cms_metrics)
+    ]
+    
+    # Collect metrics from each component
+    for component_name, fetch_function in fetch_functions:
         try:
-            node_name = generator.server_config.name
-            node_ip = generator.server_config.ip_address
-            server_type = generator.server_config.server_type
-            
-            logger.info(f"Collecting metrics from {node_name} ({node_ip})")
-            
-            # Generate metrics for this specific node
-            metrics_data = generator.generate_metrics()
-            
-            # Ensure server identification is included
-            metrics_data["server_name"] = node_name
-            metrics_data["server_ip"] = node_ip
-            
-            # Convert to database format
-            db_metrics = convert_metrics_to_db_format(metrics_data, server_type)
-            all_metrics.extend(db_metrics)
-            
-            node_count += 1
-            logger.info(f"Collected {len(db_metrics)} metrics from {node_name}")
+            logger.info(f"Collecting metrics from {component_name}")
+            component_metrics = fetch_function()
+            all_metrics.extend(component_metrics)
+            logger.info(f"Collected {len(component_metrics)} metrics from {component_name}")
             
         except Exception as e:
-            error_msg = f"Failed to collect metrics from {generator.server_config.name}: {str(e)}"
+            error_msg = f"Failed to collect metrics from {component_name}: {str(e)}"
             logger.error(error_msg)
             errors.append(error_msg)
     
@@ -508,7 +639,6 @@ def collect_all_metrics() -> Dict[str, Any]:
     
     return {
         "success": len(errors) == 0,
-        "node_count": node_count,
         "total_saved": total_saved,
         "errors": errors,
         "timestamp": last_collection_time.isoformat()

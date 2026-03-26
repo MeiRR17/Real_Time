@@ -61,13 +61,14 @@ async def health_check() -> Dict[str, Any]:
 @app.get("/api/uccx/stats", tags=["uccx"])
 async def get_uccx_stats() -> Dict[str, Any]:
     """
-    Returns simulated UCCX call center statistics.
+    Returns simulated UCCX call center statistics with deep agent-level segmentation.
     
     Metrics returned:
     - active_agents: Number of agents currently logged in and ready
     - calls_in_queue: Number of calls waiting in queue
     - avg_handle_time: Average time to handle a call (seconds)
     - service_level_percent: Percentage of calls answered within SLA
+    - agent_states: Detailed breakdown of agent extensions and their states
     
     Data fluctuates based on a simulated sine wave pattern to mimic
     realistic daily call center traffic patterns.
@@ -95,6 +96,31 @@ async def get_uccx_stats() -> Dict[str, Any]:
     # Service level inversely correlates with queue depth
     service_level = max(70, 95 - (calls_in_queue * 0.5) + random.uniform(-5, 5))
     service_level = min(100, service_level)
+    
+    # Generate detailed agent states with extensions
+    agent_extensions = ["1001", "1002", "1003", "1004", "1005", "1006", "1007", "1008", "1009", "1010"]
+    agent_states = []
+    
+    for i, ext in enumerate(agent_extensions):
+        if i < active_agents:
+            # Distribute agents across different states
+            state_prob = random.random()
+            if state_prob < 0.6:  # 60% ready
+                state = "READY"
+            elif state_prob < 0.85:  # 25% talking
+                state = "TALKING"
+            elif state_prob < 0.95:  # 10% not ready
+                state = "NOT_READY"
+            else:  # 5% wrap-up
+                state = "WRAP_UP"
+        else:
+            state = "LOGGED_OUT"
+        
+        agent_states.append({
+            "extension": ext,
+            "state": state,
+            "active_duration_seconds": random.randint(0, 3600) if state != "LOGGED_OUT" else 0
+        })
     
     return {
         "server_type": "uccx",
@@ -124,6 +150,11 @@ async def get_uccx_stats() -> Dict[str, Any]:
                 "value": int(calls_in_queue * random.uniform(0.05, 0.15)),
                 "unit": "count",
                 "description": "Calls abandoned while in queue"
+            },
+            "agent_states": {
+                "value": agent_states,
+                "unit": "list",
+                "description": "Detailed agent states by extension"
             }
         }
     }
@@ -136,13 +167,14 @@ async def get_uccx_stats() -> Dict[str, Any]:
 @app.get("/api/tgw/stats", tags=["tgw"])
 async def get_tgw_stats() -> Dict[str, Any]:
     """
-    Returns simulated TGW (Trunk Gateway) statistics.
+    Returns simulated TGW (Trunk Gateway) statistics with destination network segmentation.
     
     Metrics returned:
     - Active trunk utilization and status
     - Interface bandwidth and error counters
     - CPU and memory usage
     - Trunk registration status
+    - destination_networks: Call breakdown by destination network
     
     Data fluctuates based on business hour patterns to simulate
     realistic TGW router load patterns.
@@ -170,6 +202,30 @@ async def get_tgw_stats() -> Dict[str, Any]:
     # Error counters
     interface_errors = int(random.uniform(0, 5) * (1 if cpu_usage > 80 else 0.5))
     trunk_failures = int(random.uniform(0, 2) * (1 if cpu_usage > 85 else 0.2))
+    
+    # Generate destination network breakdown
+    destination_networks = [
+        {
+            "destination_network": "Cellular",
+            "active_calls": int(active_tunnels * 0.4),
+            "bandwidth_mbps": round(bandwidth_in * 0.4, 2)
+        },
+        {
+            "destination_network": "External_Network_X",
+            "active_calls": int(active_tunnels * 0.3),
+            "bandwidth_mbps": round(bandwidth_in * 0.3, 2)
+        },
+        {
+            "destination_network": "PSTN",
+            "active_calls": int(active_tunnels * 0.2),
+            "bandwidth_mbps": round(bandwidth_in * 0.2, 2)
+        },
+        {
+            "destination_network": "SIP_Trunk",
+            "active_calls": int(active_tunnels * 0.1),
+            "bandwidth_mbps": round(bandwidth_in * 0.1, 2)
+        }
+    ]
     
     return {
         "server_type": "tgw",
@@ -209,6 +265,128 @@ async def get_tgw_stats() -> Dict[str, Any]:
                 "value": trunk_failures,
                 "unit": "count",
                 "description": "Trunk failure count"
+            },
+            "destination_networks": {
+                "value": destination_networks,
+                "unit": "list",
+                "description": "Call breakdown by destination network"
+            }
+        }
+    }
+
+
+# =============================================================================
+# CMS (Cisco Meeting Server) Endpoints
+# =============================================================================
+
+@app.get("/api/cms/stats", tags=["cms"])
+async def get_cms_stats() -> Dict[str, Any]:
+    """
+    Returns simulated CMS (Cisco Meeting Server) statistics with participant segmentation.
+    
+    Metrics returned:
+    - Active meetings and participant counts
+    - Resource utilization (audio, video, screen share)
+    - System performance metrics
+    - participant_breakdown: Detailed breakdown by location and device type
+    
+    Data fluctuates based on business hour patterns to simulate
+    realistic CMS load patterns.
+    """
+    minute_of_day = datetime.now().hour * 60 + datetime.now().minute
+    daily_cycle = (1 + (minute_of_day % 480) / 480) * 0.7  # 8-hour cycle
+    
+    random_factor = random.uniform(0.6, 1.4)
+    
+    # CMS-specific metrics
+    active_meetings = int(30 * daily_cycle * random_factor)
+    active_meetings = max(5, min(80, active_meetings))
+    
+    total_participants = int(active_meetings * random.uniform(2, 8))
+    total_participants = max(10, min(200, total_participants))
+    
+    # Resource utilization (correlated with participants)
+    audio_resource_utilization = round(40 + (total_participants / 200) * 40 + random.uniform(-5, 10), 1)
+    audio_resource_utilization = max(15, min(95, audio_resource_utilization))
+    
+    video_resource_utilization = round(50 + (total_participants / 200) * 35 + random.uniform(-3, 8), 1)
+    video_resource_utilization = max(20, min(90, video_resource_utilization))
+    
+    # System metrics
+    cpu_usage = round(25 + (total_participants / 200) * 30 + random.uniform(-4, 6), 1)
+    cpu_usage = max(10, min(85, cpu_usage))
+    
+    memory_usage = round(35 + (total_participants / 200) * 25 + random.uniform(-2, 5), 1)
+    memory_usage = max(15, min(80, memory_usage))
+    
+    # Generate participant breakdown by location and device type
+    locations = ["Base_A", "Base_B", "Base_C", "Remote_Office_1", "Remote_Office_2"]
+    device_types = ["Webex_Board", "Jabber", "IP_Phone", "Web_App", "Mobile_App"]
+    
+    participant_breakdown = []
+    remaining_participants = total_participants
+    
+    for location in locations:
+        if remaining_participants <= 0:
+            break
+            
+        location_participants = min(remaining_participants, random.randint(1, max(1, remaining_participants // len(locations) + 5)))
+        remaining_participants -= location_participants
+        
+        # Distribute participants across device types for this location
+        for device_type in device_types:
+            if location_participants <= 0:
+                break
+                
+            device_count = min(location_participants, random.randint(0, max(1, location_participants // len(device_types) + 2)))
+            location_participants -= device_count
+            
+            if device_count > 0:
+                participant_breakdown.append({
+                    "location_base": location,
+                    "device_type": device_type,
+                    "participant_count": device_count,
+                    "bandwidth_usage_mbps": round(device_count * random.uniform(1.5, 4.0), 2)
+                })
+    
+    return {
+        "server_type": "cms",
+        "timestamp": datetime.utcnow().isoformat(),
+        "metrics": {
+            "active_meetings": {
+                "value": active_meetings,
+                "unit": "count",
+                "description": "Number of active meetings"
+            },
+            "total_participants": {
+                "value": total_participants,
+                "unit": "count",
+                "description": "Total participants across all meetings"
+            },
+            "audio_resource_utilization_percent": {
+                "value": audio_resource_utilization,
+                "unit": "percent",
+                "description": "Audio resource utilization"
+            },
+            "video_resource_utilization_percent": {
+                "value": video_resource_utilization,
+                "unit": "percent",
+                "description": "Video resource utilization"
+            },
+            "cpu_usage_percent": {
+                "value": cpu_usage,
+                "unit": "percent",
+                "description": "CMS server CPU utilization"
+            },
+            "memory_usage_percent": {
+                "value": memory_usage,
+                "unit": "percent",
+                "description": "CMS server memory utilization"
+            },
+            "participant_breakdown": {
+                "value": participant_breakdown,
+                "unit": "list",
+                "description": "Participant breakdown by location and device type"
             }
         }
     }
@@ -389,7 +567,7 @@ async def get_expressway_stats() -> Dict[str, Any]:
 @app.get("/api/cucm/system/stats", tags=["cucm"])
 async def get_cucm_stats() -> Dict[str, Any]:
     """
-    Returns simulated CUCM system statistics.
+    Returns simulated CUCM system statistics with registered phone segmentation.
     
     Metrics returned:
     - cpu_usage_percent: System CPU utilization
@@ -398,6 +576,7 @@ async def get_cucm_stats() -> Dict[str, Any]:
     - registered_phones: Number of registered endpoints
     - failed_calls: Number of failed call attempts
     - abandoned_calls: Number of calls abandoned while in queue
+    - phone_breakdown: Detailed breakdown of registered phones by location and prefix
     
     CPU and memory usage fluctuate based on call volume to simulate
     real system resource correlation.
@@ -433,6 +612,37 @@ async def get_cucm_stats() -> Dict[str, Any]:
     calls_in_queue = int(50 * random.uniform(0.05, 0.15))
     abandoned_calls = int(calls_in_queue * random.uniform(0.05, 0.15))
     abandoned_calls = max(0, min(50, abandoned_calls))
+    
+    # Generate phone breakdown by location and prefix
+    locations = ["Base_A", "Base_B", "Base_C", "Remote_Office_1", "Remote_Office_2"]
+    prefixes = ["03", "04", "05", "06", "07"]
+    
+    phone_breakdown = []
+    remaining_phones = registered_phones
+    
+    for location in locations:
+        if remaining_phones <= 0:
+            break
+            
+        location_phones = min(remaining_phones, random.randint(50, max(50, remaining_phones // len(locations) + 50)))
+        remaining_phones -= location_phones
+        
+        # Distribute phones across prefixes for this location
+        for prefix in prefixes:
+            if location_phones <= 0:
+                break
+                
+            prefix_phones = min(location_phones, random.randint(5, max(5, location_phones // len(prefixes) + 10)))
+            location_phones -= prefix_phones
+            
+            if prefix_phones > 0:
+                phone_breakdown.append({
+                    "location_base": location,
+                    "prefix": prefix,
+                    "registered_phone_count": prefix_phones,
+                    "active_phone_count": int(prefix_phones * random.uniform(0.7, 0.95)),
+                    "avg_call_volume_today": int(prefix_phones * random.uniform(0.5, 2.0))
+                })
     
     return {
         "server_type": "cucm",
@@ -472,9 +682,13 @@ async def get_cucm_stats() -> Dict[str, Any]:
                 "value": int(active_calls * random.uniform(1.2, 2.0)),
                 "unit": "count",
                 "description": "Total calls processed (includes completed)"
+            },
+            "phone_breakdown": {
+                "value": phone_breakdown,
+                "unit": "list",
+                "description": "Phone registration breakdown by location and prefix"
             }
         }
-    }
     }
 
 

@@ -25,6 +25,168 @@ Base = declarative_base()
 
 
 # =============================================================================
+# Unified Telephony Metric Model
+# =============================================================================
+class TelephonyMetric(Base):
+    """
+    Unified telephony metrics model for storing segmented data from all components.
+    This model supports high-resolution segmentation with location, device type,
+    extension, destination network, and prefix tracking.
+    """
+    
+    __tablename__ = "telephony_metrics"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        server_default=func.now(),
+        index=True,
+        comment="Timestamp when the metric was recorded (UTC)"
+    )
+    
+    # Server identification
+    server_type = Column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="Type of server (cucm, uccx, cms, tgw, etc.)"
+    )
+    
+    server_name = Column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Friendly name of the server"
+    )
+    
+    server_ip = Column(
+        String(45),  # IPv6 compatible
+        nullable=True,
+        index=True,
+        comment="IP address of the server"
+    )
+    
+    # Metric identification
+    metric_name = Column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Name of the metric"
+    )
+    
+    metric_value = Column(
+        String(500),
+        nullable=False,
+        comment="Value of the metric (stored as string for flexibility)"
+    )
+    
+    unit = Column(
+        String(50),
+        nullable=True,
+        comment="Unit of measurement (count, percent, seconds, etc.)"
+    )
+    
+    # Deep segmentation fields for high-resolution metrics
+    location_base = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Base/location identifier for segmentation"
+    )
+    
+    device_type = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Device type for segmentation (Webex_Board, Jabber, IP_Phone)"
+    )
+    
+    extension = Column(
+        String(20),
+        nullable=True,
+        index=True,
+        comment="Agent extension number for detailed state tracking"
+    )
+    
+    destination_network = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Destination network for call routing segmentation"
+    )
+    
+    prefix = Column(
+        String(10),
+        nullable=True,
+        index=True,
+        comment="Phone number prefix for segmentation analysis"
+    )
+    
+    # Metadata fields
+    collection_method = Column(
+        String(50),
+        nullable=False,
+        default="api",
+        comment="Method used to collect the metric (api, mock, snmp, etc.)"
+    )
+    
+    raw_data = Column(
+        Text,
+        nullable=True,
+        comment="Raw response data from the server"
+    )
+    
+    error_message = Column(
+        Text,
+        nullable=True,
+        comment="Error message if collection failed"
+    )
+    
+    is_success = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        comment="Whether the metric collection was successful"
+    )
+    
+    # Constraints
+    __table_args__ = (
+        Index("idx_telephony_timestamp_server", "timestamp", "server_type", "server_name"),
+        Index("idx_telephony_metric_name", "metric_name"),
+        Index("idx_telephony_location", "location_base"),
+        Index("idx_telephony_device", "device_type"),
+        Index("idx_telephony_extension", "extension"),
+        Index("idx_telephony_destination", "destination_network"),
+        Index("idx_telephony_prefix", "prefix"),
+        {"comment": "Unified telephony metrics with deep segmentation support"}
+    )
+    
+    def to_dict(self) -> dict:
+        """Convert telephony metric to dictionary."""
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "server_type": self.server_type,
+            "server_name": self.server_name,
+            "server_ip": self.server_ip,
+            "metric_name": self.metric_name,
+            "metric_value": self.metric_value,
+            "unit": self.unit,
+            "location_base": self.location_base,
+            "device_type": self.device_type,
+            "extension": self.extension,
+            "destination_network": self.destination_network,
+            "prefix": self.prefix,
+            "collection_method": self.collection_method,
+            "raw_data": self.raw_data,
+            "error_message": self.error_message,
+            "is_success": self.is_success
+        }
+
+
+# =============================================================================
 # Base Metrics Model
 # =============================================================================
 class BaseMetric(Base):
@@ -193,6 +355,21 @@ class CUCMMetric(BaseMetric):
         comment="Average trunk utilization percentage"
     )
     
+    # Deep segmentation fields for high-resolution metrics
+    location_base = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Base/location identifier for registered phones segmentation"
+    )
+    
+    prefix = Column(
+        String(10),
+        nullable=True,
+        index=True,
+        comment="Phone number prefix for segmentation analysis"
+    )
+    
     # Constraints
     __table_args__ = (
         CheckConstraint("active_calls >= 0", name="check_cucm_active_calls_non_negative"),
@@ -221,7 +398,9 @@ class CUCMMetric(BaseMetric):
             "publisher_status": self.publisher_status,
             "subscriber_count": self.subscriber_count,
             "active_trunks": self.active_trunks,
-            "trunk_utilization_percent": self.trunk_utilization_percent
+            "trunk_utilization_percent": self.trunk_utilization_percent,
+            "location_base": self.location_base,
+            "prefix": self.prefix
         }
         base_dict.update(cucm_dict)
         return base_dict
@@ -340,6 +519,14 @@ class UCCXMetric(BaseMetric):
         comment="UCCX server memory utilization"
     )
     
+    # Deep segmentation fields for high-resolution metrics
+    extension = Column(
+        String(20),
+        nullable=True,
+        index=True,
+        comment="Agent extension number for detailed state tracking"
+    )
+    
     # Constraints
     __table_args__ = (
         CheckConstraint("logged_in_agents >= 0", name="check_uccx_logged_in_agents_non_negative"),
@@ -372,7 +559,8 @@ class UCCXMetric(BaseMetric):
             "average_handle_time_seconds": self.average_handle_time_seconds,
             "active_skill_groups": self.active_skill_groups,
             "cpu_usage_percent": self.cpu_usage_percent,
-            "memory_usage_percent": self.memory_usage_percent
+            "memory_usage_percent": self.memory_usage_percent,
+            "extension": self.extension
         }
         base_dict.update(uccx_dict)
         return base_dict
@@ -485,6 +673,21 @@ class CMSMetric(BaseMetric):
         comment="Average packet loss percentage"
     )
     
+    # Deep segmentation fields for high-resolution metrics
+    location_base = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Base/location identifier for conference segmentation"
+    )
+    
+    device_type = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Device type for participant segmentation (Webex_Board, Jabber, IP_Phone)"
+    )
+    
     # Constraints
     __table_args__ = (
         CheckConstraint("active_meetings >= 0", name="check_cms_active_meetings_non_negative"),
@@ -515,7 +718,9 @@ class CMSMetric(BaseMetric):
             "memory_usage_percent": self.memory_usage_percent,
             "network_bandwidth_mbps": self.network_bandwidth_mbps,
             "average_jitter_ms": self.average_jitter_ms,
-            "packet_loss_percent": self.packet_loss_percent
+            "packet_loss_percent": self.packet_loss_percent,
+            "location_base": self.location_base,
+            "device_type": self.device_type
         }
         base_dict.update(cms_dict)
         return base_dict
@@ -801,6 +1006,21 @@ class MeetingPlaceMetric(BaseMetric):
         comment="Number of dropped calls today"
     )
     
+    # Deep segmentation fields for high-resolution metrics
+    location_base = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Base/location identifier for conference segmentation"
+    )
+    
+    device_type = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Device type for participant segmentation (Webex_Board, Jabber, IP_Phone)"
+    )
+    
     # Constraints
     __table_args__ = (
         CheckConstraint("active_conferences >= 0", name="check_mp_active_conferences_non_negative"),
@@ -833,7 +1053,9 @@ class MeetingPlaceMetric(BaseMetric):
             "active_bridges": self.active_bridges,
             "total_bridges": self.total_bridges,
             "average_conference_duration_minutes": self.average_conference_duration_minutes,
-            "dropped_calls": self.dropped_calls
+            "dropped_calls": self.dropped_calls,
+            "location_base": self.location_base,
+            "device_type": self.device_type
         }
         base_dict.update(mp_dict)
         return base_dict
@@ -909,6 +1131,14 @@ class TGWMetric(BaseMetric):
         comment="SNMP connection status"
     )
     
+    # Deep segmentation fields for high-resolution metrics
+    destination_network = Column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Destination network for call routing segmentation (Cellular, External_Network_X)"
+    )
+    
     # Constraints
     __table_args__ = (
         CheckConstraint("active_interfaces >= 0", name="check_tgw_active_interfaces_non_negative"),
@@ -932,7 +1162,8 @@ class TGWMetric(BaseMetric):
             "active_calls": self.active_calls,
             "total_calls_today": self.total_calls_today,
             "failed_calls": self.failed_calls,
-            "snmp_status": self.snmp_status
+            "snmp_status": self.snmp_status,
+            "destination_network": self.destination_network
         }
         base_dict.update(tgw_dict)
         return base_dict
@@ -1630,6 +1861,7 @@ METRIC_MODELS = {
 }
 
 ALL_MODELS = [
+    TelephonyMetric,
     CUCMMetric,
     UCCXMetric,
     CMSMetric,
@@ -1643,6 +1875,7 @@ ALL_MODELS = [
 
 __all__ = [
     "Base",
+    "TelephonyMetric",
     "BaseMetric",
     "CUCMMetric",
     "UCCXMetric",
