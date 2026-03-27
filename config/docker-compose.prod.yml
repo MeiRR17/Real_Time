@@ -1,0 +1,555 @@
+# =========================================================================
+# PRODUCTION DOCKER COMPOSE CONFIGURATION
+# Cisco Telephony Monitoring System
+# =========================================================================
+
+version: '3.8'
+
+services:
+  # =========================================================================
+  # Service 1: Proxy Gateway (Central Data Collection)
+  # =========================================================================
+  proxy-gateway:
+    build: 
+      context: ./proxy-gateway
+      dockerfile: Dockerfile
+    container_name: telephony-proxy-gateway-prod
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://telephony_user:TelephonySecurePassword2024!@cucm-postgres:5432/cucm_db
+      - MOCK_SERVER_URL=http://mock-server:8001
+      - AXLERATE_URL=http://axlerate:8002
+      - REDIS_URL=redis://redis:6379/0
+      - ENABLE_POLLING=true
+      - POLLING_INTERVAL=60
+      - REQUEST_TIMEOUT=10
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs/proxy-gateway:/app/logs
+      - ./data/proxy-gateway:/app/data
+      - ./config/.env.production:/app/.env:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      cucm-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-server:
+        condition: service_healthy
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # =========================================================================
+  # Service 2: AXLerate REST Middleware
+  # =========================================================================
+  axlerate:
+    build:
+      context: ./AXLerate
+      dockerfile: Dockerfile
+    container_name: telephony-axlerate-prod
+    restart: always
+    environment:
+      - CUCM_HOST=192.168.1.100
+      - CUCM_USERNAME=admin
+      - CUCM_PASSWORD=CUCMSecurePassword2024!
+      - CUCM_PORT=443
+      - CUCM_VERIFY_SSL=false
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs/axlerate:/app/logs
+      - ./config/.env.production:/app/.env:ro
+    ports:
+      - "8002:8002"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1.5G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # =========================================================================
+  # Service 3: Mock Cisco Server (Development/Testing)
+  # =========================================================================
+  mock-server:
+    build:
+      context: ./mock-server
+      dockerfile: Dockerfile
+    container_name: telephony-mock-server-prod
+    restart: always
+    environment:
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs/mock-server:/app/logs
+    ports:
+      - "8001:8001"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # =========================================================================
+  # Service 4: Redis Cache
+  # =========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: telephony-redis-prod
+    restart: always
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --tcp-keepalive 60
+      --timeout 0
+      --loglevel notice
+      --logfile /var/log/redis/redis-server.log
+    volumes:
+      - redis_data:/data
+      - ./logs/redis:/var/log/redis
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    ports:
+      - "6379:6379"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # =========================================================================
+  # Service 5: CUCM Database
+  # =========================================================================
+  cucm-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-cucm-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: TelephonySecurePassword2024!
+      POSTGRES_DB: cucm_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - cucm_postgres_data:/var/lib/postgresql/data
+      - ./postgres/cucm-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/postgres/cucm:/var/log/postgresql
+      - ./config/postgres.conf:/etc/postgresql/postgresql.conf:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telephony_user -d cucm_db"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =========================================================================
+  # Service 6: UCCX Database
+  # =========================================================================
+  uccx-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-uccx-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: TelephonySecurePassword2024!
+      POSTGRES_DB: uccx_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - uccx_postgres_data:/var/lib/postgresql/data
+      - ./postgres/uccx-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/postgres/uccx:/var/log/postgresql
+    ports:
+      - "5433:5432"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telephony_user -d uccx_db"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =========================================================================
+  # Service 7: TGW Database
+  # =========================================================================
+  tgw-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-tgw-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: TelephonySecurePassword2024!
+      POSTGRES_DB: tgw_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - tgw_postgres_data:/var/lib/postgresql/data
+      - ./postgres/tgw-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/postgres/tgw:/var/log/postgresql
+    ports:
+      - "5434:5432"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telephony_user -d tgw_db"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =========================================================================
+  # Service 8: SBC Database
+  # =========================================================================
+  sbc-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-sbc-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: TelephonySecurePassword2024!
+      POSTGRES_DB: sbc_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - sbc_postgres_data:/var/lib/postgresql/data
+      - ./postgres/sbc-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/postgres/sbc:/var/log/postgresql
+    ports:
+      - "5435:5432"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telephony_user -d sbc_db"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =========================================================================
+  # Service 9: CMS Database
+  # =========================================================================
+  cms-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-cms-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: TelephonySecurePassword2024!
+      POSTGRES_DB: cms_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - cms_postgres_data:/var/lib/postgresql/data
+      - ./postgres/cms-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/postgres/cms:/var/log/postgresql
+    ports:
+      - "5436:5432"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telephony_user -d cms_db"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =========================================================================
+  # Service 10: IMP Database
+  # =========================================================================
+  imp-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-imp-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: TelephonySecurePassword2024!
+      POSTGRES_DB: imp_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - imp_postgres_data:/var/lib/postgresql/data
+      - ./postgres/imp-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/postgres/imp:/var/log/postgresql
+    ports:
+      - "5437:5432"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telephony_user -d imp_db"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =========================================================================
+  # Service 11: Meeting Place Database
+  # =========================================================================
+  meeting-place-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-meeting-place-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: TelephonySecurePassword2024!
+      POSTGRES_DB: meeting_place_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - meeting_place_postgres_data:/var/lib/postgresql/data
+      - ./postgres/meeting-place-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/postgres/meeting-place:/var/log/postgresql
+    ports:
+      - "5438:5432"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telephony_user -d meeting_place_db"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # =========================================================================
+  # Service 12: Expressway Database
+  # =========================================================================
+  expressway-postgres:
+    image: postgres:15-alpine
+    container_name: telephony-expressway-postgres-prod
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: TelephonySecurePassword2024!
+      POSTGRES_DB: expressway_db
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
+    volumes:
+      - expressway_postgres_data:/var/lib/postgresql/data
+      - ./postgres/expressway-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/postgres/expressway:/var/log/postgresql
+    ports:
+      - "5439:5432"
+    networks:
+      - telephony-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telephony_user -d expressway_db"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+# =========================================================================
+# NETWORKS
+# =========================================================================
+networks:
+  telephony-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.25.0.0/16
+          gateway: 172.25.0.1
+
+# =========================================================================
+# VOLUMES
+# =========================================================================
+volumes:
+  # Redis data directory
+  redis_data:
+    driver: local
+  
+  # PostgreSQL data directories
+  cucm_postgres_data:
+    driver: local
+  
+  uccx_postgres_data:
+    driver: local
+  
+  tgw_postgres_data:
+    driver: local
+  
+  sbc_postgres_data:
+    driver: local
+  
+  cms_postgres_data:
+    driver: local
+  
+  imp_postgres_data:
+    driver: local
+  
+  meeting_place_postgres_data:
+    driver: local
+  
+  expressway_postgres_data:
+    driver: local
