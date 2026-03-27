@@ -221,32 +221,7 @@ services:
     networks:
       - telephony-network
 
-  # ===========================================================================
-  # Service 9: Superset Database
-  # ===========================================================================
-  superset-postgres:
-    image: postgres:15-alpine
-    container_name: telephony-superset-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: superset_db
-      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.UTF-8"
-    volumes:
-      - superset_postgres_data:/var/lib/postgresql/data
-      - ./postgres/superset-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    ports:
-      - "5441:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - telephony-network
-
+  
   # ===========================================================================
   # Service 10: Redis Cache
   # ===========================================================================
@@ -338,6 +313,7 @@ services:
     environment:
       MOCK_SERVER_URL: http://mock-server:8001
       AXLERATE_URL: http://axlerate:8000
+      DATABASE_URL: postgresql://postgres:password@cucm-postgres:5432/cucm_db
       ENABLE_POLLING: "true"
       POLLING_INTERVAL: "60"
       REQUEST_TIMEOUT: "10"
@@ -398,33 +374,7 @@ services:
     networks:
       - telephony-network
 
-  # ===========================================================================
-  # Service 13: Apache Superset
-  # ===========================================================================
-  superset:
-    build: ./superset
-    container_name: telephony-superset
-    restart: unless-stopped
-    environment:
-      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
-      SUPERSET_PRIMARY_URL: postgresql://postgres:password@superset-postgres:5432/superset_db
-      REDIS_URL: redis://redis:6379/0
-      SECRET_KEY: your-super-secret-key-change-in-production
-    volumes:
-      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
-      - ./superset/superset-init.sh:/app/superset-init.sh:ro
-      - superset_data:/app/superset_home
-    command: ["/app/superset-init.sh"]
-    ports:
-      - "8088:8088"
-    depends_on:
-      superset-postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - telephony-network
-
+  
   # =============================================================================
 # Named Volumes for Data Persistence
 # =============================================================================
@@ -454,17 +404,11 @@ volumes:
   expressway_postgres_data:
     driver: local
   
-  superset_postgres_data:
-    driver: local
-  
   # Redis data directory
   redis_data:
     driver: local
   
-  # Superset home directory (uploads, exports)
-  superset_data:
-    driver: local
-
+  
 # =============================================================================
 # Docker Networks
 # =============================================================================
@@ -474,4 +418,4 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.25.0.0/16

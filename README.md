@@ -1,53 +1,1515 @@
-# Cisco Telephony Monitoring System - Production Architecture Guide
+# Cisco Telephony Monitoring System - Production Deployment Guide
 
-## Table of Contents
+## 🎯 **Table of Contents**
 1. [System Overview](#system-overview)
 2. [Architecture Components](#architecture-components)
-3. [Data Flow Architecture](#data-flow-architecture)
-4. [Supported Cisco Components](#supported-cisco-components)
-5. [Data Types and Sources](#data-types-and-sources)
-6. [Database Schema Design](#database-schema-design)
-7. [Installation and Deployment](#installation-and-deployment)
-8. [Configuration Management](#configuration-management)
-9. [Real-world Implementation Guide](#real-world-implementation-guide)
-10. [Superset Dashboard Configuration](#superset-dashboard-configuration)
-11. [Monitoring and Alerting](#monitoring-and-alerting)
-12. [Security Considerations](#security-considerations)
-13. [Performance Optimization](#performance-optimization)
-14. [Troubleshooting Guide](#troubleshooting-guide)
-15. [Scaling Strategies](#scaling-strategies)
-16. [Maintenance Procedures](#maintenance-procedures)
-17. [Integration with External Systems](#integration-with-external-systems)
-18. [Backup and Recovery](#backup-and-recovery)
-19. [Compliance and Auditing](#compliance-and-auditing)
-20. [Future Enhancements](#future-enhancements)
+3. [Production Deployment Strategy](#production-deployment-strategy)
+4. [Server Preparation](#server-preparation)
+5. [Application Packaging](#application-packaging)
+6. [ESXi 6.7 Deployment](#esxi-67-deployment)
+7. [WinSCP Transfer Process](#winscp-transfer-process)
+8. [Service Configuration](#service-configuration)
+9. [Cisco Component Integration](#cisco-component-integration)
+10. [TGW & SBC Connectivity](#tgw--sbc-connectivity)
+11. [SSH vs SNMP Configuration](#ssh-vs-snmp-configuration)
+12. [Code Improvements](#code-improvements)
+13. [Production Optimization](#production-optimization)
+14. [Monitoring & Maintenance](#monitoring--maintenance)
+15. [Troubleshooting](#troubleshooting)
 
 ---
 
-## System Overview
+## 🎯 **System Overview**
 
 The Cisco Telephony Monitoring System is a comprehensive, production-ready microservices architecture designed to collect, process, and visualize telephony metrics from multiple Cisco components in real-time. This system provides centralized monitoring capabilities for enterprise telephony infrastructure, enabling proactive management and optimization of communication services.
 
-### Key Objectives
+### 🎯 **Key Objectives**
 - **Unified Monitoring**: Single pane of glass for all Cisco telephony components
-- **Real-time Data Collection**: Continuous polling and processing of telephony metrics
+- **Real-time Data Collection**: Continuous polling and processing of telephony metrics  
 - **Scalable Architecture**: Microservices design supporting horizontal scaling
-- **Data Visualization**: Interactive dashboards for operational insights
 - **Production Ready**: Enterprise-grade security, reliability, and maintainability
+- **Multi-Protocol Support**: SSH, SNMP, and REST API integration capabilities
 
-### Business Value
+### 💼 **Business Value**
 - Reduced downtime through proactive monitoring
 - Optimized resource utilization based on real usage patterns
 - Improved capacity planning with historical trend analysis
 - Enhanced troubleshooting with correlated metrics across components
 - Compliance reporting through comprehensive audit trails
 
-### 🚀 **New in This Version**
-- **AXLerate REST Middleware**: Comprehensive Cisco UC SDK with 4 major APIs (AXL, Perfmon, RisPort, Control Center)
-- **Multi-Node Support**: Full cluster monitoring for all Cisco components
-- **100% REST-Based Architecture**: Eliminates direct SOAP dependencies
-- **Production-Ready SDK**: Type-safe, robust error handling, comprehensive documentation
-- **Swagger/OpenAPI Interface**: Interactive API documentation and testing
+---
+
+## 🏗️ **Architecture Components**
+
+### **Core Microservices**
+- **AXLerate REST Middleware** (Port 8002): Cisco UC SDK with 4 major APIs
+- **Proxy Gateway** (Port 8000): Central data collection and processing
+- **Mock Server** (Port 8001): Development and testing simulation
+- **Redis Cache**: Session management and caching layer
+- **PostgreSQL Clusters**: 9 separate databases for component isolation
+
+### **Data Flow Architecture**
+```
+Cisco Components → AXLerate → Proxy Gateway → PostgreSQL → APIs → Frontend
+                    ↓           ↓              ↓           ↓
+                REST APIs   Data Processing  Storage   Visualization
+```
+
+---
+
+## 🚀 **Production Deployment Strategy**
+
+### **Deployment Architecture**
+```
+Development Server → TAR Package → WinSCP → ESXi 6.7 Server → Production
+       ↓                    ↓          ↓           ↓              ↓
+   Local Docker        Packaging   File Transfer  VM Setup    Services
+```
+
+### **Key Considerations**
+- **Server Isolation**: Dedicated ESXi 6.7 host for production
+- **Network Security**: VLAN segmentation and firewall rules
+- **Data Persistence**: Persistent storage for PostgreSQL databases
+- **Backup Strategy**: Automated backups and disaster recovery
+- **Monitoring**: System health and performance monitoring
+
+---
+
+## 🖥️ **Server Preparation**
+
+### **ESXi 6.7 Server Requirements**
+```bash
+# Minimum Hardware Specifications
+CPU: 8+ cores (Intel Xeon recommended)
+RAM: 32GB+ (64GB recommended for production)
+Storage: 500GB+ SSD (1TB+ for large deployments)
+Network: Dual NICs for redundancy
+```
+
+### **ESXi 6.7 Configuration**
+```bash
+# 1. Enable SSH Access
+# Navigate to: Manage > Services > TSM-SSH > Start
+
+# 2. Create Datastore
+# Navigate to: Storage > New Datastore
+# Format: VMFS 6
+# Size: Allocate sufficient space for containers and databases
+
+# 3. Network Configuration
+# Configure Port Groups for different traffic types:
+# - Management Network
+# - Application Network  
+# - Database Network
+# - Backup Network
+
+# 4. Security Hardening
+# Disable unnecessary services
+# Configure firewall rules
+# Set up NTP synchronization
+```
+
+### **VM Template Creation**
+```bash
+# Create VM Template with following specifications:
+vCPU: 4 cores
+RAM: 8GB
+Storage: 100GB thin provisioned
+OS: Ubuntu 22.04 LTS
+Network: Connected to Application Network
+```
+
+---
+
+## 📦 **Application Packaging**
+
+### **Step 1: Clean Local Environment**
+```bash
+# Stop all services
+cd /path/to/Real_Time
+docker-compose down -v
+
+# Clean up unnecessary files
+docker system prune -a
+docker volume prune
+```
+
+### **Step 2: Create Production TAR Package**
+```bash
+# Create comprehensive deployment package
+tar -czf telephony-monitoring-production.tar.gz \
+    --exclude='.git' \
+    --exclude='__pycache__' \
+    --exclude='*.pyc' \
+    --exclude='.pytest_cache' \
+    --exclude='.venv' \
+    --exclude='tests/' \
+    --exclude='*.log' \
+    --exclude='node_modules/' \
+    .
+
+# Verify package integrity
+tar -tzf telephony-monitoring-production.tar.gz | head -20
+```
+
+### **Step 3: Package Contents Verification**
+```bash
+# Expected package structure:
+telephony-monitoring-production.tar.gz
+├── AXLerate/
+│   ├── app/
+│   │   ├── main.py
+│   │   └── cisco_uc_sdk.py
+│   ├── Dockerfile
+│   └── requirements.txt
+├── proxy-gateway/
+│   ├── main.py
+│   ├── models.py
+│   └── Dockerfile
+├── mock-server/
+│   ├── main.py
+│   └── Dockerfile
+├── postgres/
+│   ├── cucm-init.sql
+│   ├── uccx-init.sql
+│   └── [component]-init.sql
+├── docker-compose.yml
+├── config.py
+├── requirements.txt
+├── .env.example
+└── README.md
+```
+
+---
+
+## 🔄 **WinSCP Transfer Process**
+
+### **Step 1: WinSCP Configuration**
+```bash
+# Connection Settings:
+Host: [ESXi Server IP]
+Port: 22
+Username: root
+Password: [ESXi Root Password]
+Protocol: SCP
+
+# Advanced Settings:
+- Enable compression
+- Set timeout to 60 seconds
+- Configure keep-alive every 30 seconds
+```
+
+### **Step 2: Directory Structure Creation**
+```bash
+# Create directory structure on ESXi server
+mkdir -p /vmfs/volumes/datastore1/telephony-monitoring
+mkdir -p /vmfs/volumes/datastore1/telephony-monitoring/app
+mkdir -p /vmfs/volumes/datastore1/telephony-monitoring/data
+mkdir -p /vmfs/volumes/datastore1/telephony-monitoring/logs
+mkdir -p /vmfs/volumes/datastore1/telephony-monitoring/backups
+```
+
+### **Step 3: File Transfer**
+```bash
+# Transfer main package
+# Drag telephony-monitoring-production.tar.gz to:
+# /vmfs/volumes/datastore1/telephony-monitoring/
+
+# Transfer additional configuration files
+# .env.production → /vmfs/volumes/datastore1/telephony-monitoring/.env
+# docker-compose.prod.yml → /vmfs/volumes/datastore1/telephony-monitoring/
+```
+
+### **Step 4: Post-Transfer Verification**
+```bash
+# SSH to ESXi server
+ssh root@[ESXi IP]
+
+# Verify file integrity
+cd /vmfs/volumes/datastore1/telephony-monitoring
+ls -la
+md5sum telephony-monitoring-production.tar.gz
+
+# Extract package
+tar -xzf telephony-monitoring-production.tar.gz
+```
+
+---
+
+## 🖥️ **ESXi 6.7 Deployment**
+
+### **Step 1: VM Creation**
+```bash
+# Using vSphere Client or CLI:
+# 1. Right-click on Datacenter > New Virtual Machine
+# 2. Configuration: Custom
+# 3. Name: telephony-monitoring-prod
+# 4. Compatibility: ESXi 6.7
+# 5. Guest OS: Linux > Ubuntu Linux (64-bit)
+# 6. Storage: Select datastore1
+# 7. Network: Application Network
+```
+
+### **Step 2: VM Configuration**
+```bash
+# Hardware Settings:
+CPU: 4 vCPU (2 sockets x 2 cores)
+RAM: 8192 MB
+Hard Disk: 100 GB, Thin Provisioned
+Network Adapter: VMXNET3
+SCSI Controller: LSI Logic SAS
+```
+
+### **Step 3: Ubuntu 22.04 Installation**
+```bash
+# Mount Ubuntu 22.04 ISO
+# Boot VM and install with following settings:
+- Language: English
+- Timezone: Your timezone
+- Keyboard: US English
+- Installation type: Minimal
+- Network: Configure static IP
+- User: telephony (sudo privileges)
+```
+
+### **Step 4: System Preparation**
+```bash
+# Update system packages
+sudo apt update && sudo apt upgrade -y
+
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo usermod -aG docker telephony
+
+# Install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
+
+# Configure firewall
+sudo ufw allow 22/tcp
+sudo ufw allow 8000/tcp
+sudo ufw allow 8001/tcp
+sudo ufw allow 8002/tcp
+sudo ufw allow 5432/tcp
+sudo ufw allow 6379/tcp
+sudo ufw enable
+```
+
+---
+
+## ⚙️ **Service Configuration**
+
+### **Step 1: Environment Configuration**
+```bash
+# Create production environment file
+cp .env.example .env
+
+# Edit .env with production values:
+nano .env
+```
+
+```bash
+# Production .env configuration:
+# Database Configuration
+POSTGRES_USER=telephony_user
+POSTGRES_PASSWORD=[STRONG_PASSWORD]
+POSTGRES_HOST=postgres
+POSTGRES_PORT=5432
+
+# Multi-Database URLs
+CUCM_PRIMARY_URL=postgresql://telephony_user:[PASSWORD]@cucm-postgres:5432/cucm_db
+UCCX_PRIMARY_URL=postgresql://telephony_user:[PASSWORD]@uccx-postgres:5432/uccx_db
+CMS_PRIMARY_URL=postgresql://telephony_user:[PASSWORD]@cms-postgres:5432/cms_db
+IMP_PRIMARY_URL=postgresql://telephony_user:[PASSWORD]@imp-postgres:5432/imp_db
+MEETING_PLACE_PRIMARY_URL=postgresql://telephony_user:[PASSWORD]@meeting-place-postgres:5432/meeting_place_db
+TGW_PRIMARY_URL=postgresql://telephony_user:[PASSWORD]@tgw-postgres:5432/tgw_db
+SBC_PRIMARY_URL=postgresql://telephony_user:[PASSWORD]@sbc-postgres:5432/sbc_db
+EXPRESSWAY_PRIMARY_URL=postgresql://telephony_user:[PASSWORD]@expressway-postgres:5432/expressway_db
+
+# Cisco Component Configuration
+CUCM_HOST=192.168.1.100
+CUCM_USERNAME=admin
+CUCM_PASSWORD=[CUCM_PASSWORD]
+CUCM_PORT=443
+
+UCCX_HOST=192.168.1.101
+UCCX_USERNAME=admin
+UCCX_PASSWORD=[UCCX_PASSWORD]
+UCCX_PORT=443
+
+# TGW Configuration
+TGW_HOST=192.168.1.102
+TGW_SNMP_COMMUNITY=[SNMP_COMMUNITY]
+TGW_SNMP_PORT=161
+TGW_SNMP_VERSION=2c
+TGW_SNMP_TIMEOUT=5
+USE_REAL_TGW=true
+
+# SBC Configuration
+SBC_HOST=192.168.1.103
+SBC_USERNAME=admin
+SBC_PASSWORD=[SBC_PASSWORD]
+SBC_PORT=443
+SBC_VERIFY_SSL=false
+USE_REAL_SBC=true
+
+# Application Configuration
+ENABLE_POLLING=true
+POLLING_INTERVAL=60
+REQUEST_TIMEOUT=10
+PYTHONUNBUFFERED=1
+```
+
+### **Step 2: Production Docker Compose**
+```bash
+# Create production-specific docker-compose
+cp docker-compose.yml docker-compose.prod.yml
+
+# Edit for production settings:
+nano docker-compose.prod.yml
+```
+
+```yaml
+# Production modifications in docker-compose.prod.yml:
+version: '3.8'
+
+services:
+  proxy-gateway:
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://telephony_user:[PASSWORD]@cucm-postgres:5432/cucm_db
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  axlerate:
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mock-server:
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    restart: always
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+
+  [component]-postgres:
+    restart: always
+    environment:
+      POSTGRES_USER: telephony_user
+      POSTGRES_PASSWORD: [STRONG_PASSWORD]
+    volumes:
+      - [component]_postgres_data:/var/lib/postgresql/data
+      - ./logs/postgres/[component]:/var/log/postgresql
+```
+
+### **Step 3: Service Startup**
+```bash
+# Build and start services
+docker-compose -f docker-compose.prod.yml up -d --build
+
+# Verify service health
+docker-compose -f docker-compose.prod.yml ps
+
+# Check logs
+docker-compose -f docker-compose.prod.yml logs -f proxy-gateway
+```
+
+---
+
+## 🔌 **Cisco Component Integration**
+
+### **Step 1: Network Connectivity**
+```bash
+# Verify network connectivity to Cisco components
+ping 192.168.1.100  # CUCM
+ping 192.168.1.101  # UCCX
+ping 192.168.1.102  # TGW
+ping 192.168.1.103  # SBC
+
+# Test port accessibility
+telnet 192.168.1.100 443  # CUCM HTTPS
+telnet 192.168.1.101 443  # UCCX HTTPS
+telnet 192.168.1.102 161  # TGW SNMP
+telnet 192.168.1.103 22   # SBC SSH
+```
+
+### **Step 2: CUCM Integration**
+```bash
+# Test AXL API access
+curl -k -u "admin:[PASSWORD]" \
+     "https://192.168.1.100:8443/axl/" \
+     -H "Content-Type: text/xml" \
+     -d '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:axl="http://www.cisco.com/AXL/API/1.0">
+           <soapenv:Body>
+             <axl:executeSQLQuery>
+               <axl:sql>SELECT count(*) FROM device</axl:sql>
+             </axl:executeSQLQuery>
+           </soapenv:Body>
+         </soapenv:Envelope>'
+
+# Test Perfmon API
+curl -k -u "admin:[PASSWORD]" \
+     "https://192.168.1.100:8443/perfmonservice/"
+```
+
+### **Step 3: UCCX Integration**
+```bash
+# Test UCCX API access
+curl -k -u "admin:[PASSWORD]" \
+     "https://192.168.1.101:8443/adminapi/csq"
+
+# Test Real-time data
+curl -k -u "admin:[PASSWORD]" \
+     "https://192.168.1.101:8443/adminapi/agent"
+```
+
+### **Step 4: Service Configuration Updates**
+```python
+# Update config.py with real Cisco credentials
+# In config.py, update the following classes:
+
+class CiscoServerConfig:
+    # CUCM Configuration
+    cucm_host: str = "192.168.1.100"
+    cucm_username: str = "admin"
+    cucm_password: str = "[CUCM_PASSWORD]"
+    cucm_port: int = 443
+    cucm_verify_ssl: bool = False
+    
+    # UCCX Configuration  
+    uccx_host: str = "192.168.1.101"
+    uccx_username: str = "admin"
+    uccx_password: str = "[UCCX_PASSWORD]"
+    uccx_port: int = 443
+    uccx_verify_ssl: bool = False
+    
+    # TGW Configuration
+    tgw_host: str = "192.168.1.102"
+    tgw_snmp_community: str = "[SNMP_COMMUNITY]"
+    tgw_snmp_port: int = 161
+    tgw_snmp_version: str = "2c"
+    
+    # SBC Configuration
+    sbc_host: str = "192.168.1.103"
+    sbc_username: str = "admin"
+    sbc_password: str = "[SBC_PASSWORD]"
+    sbc_port: int = 443
+    sbc_verify_ssl: bool = False
+```
+
+---
+
+## 🌐 **TGW & SBC Connectivity**
+
+### **TGW (Telephony Gateway) Integration**
+
+#### **Step 1: SNMP Configuration**
+```bash
+# Install SNMP tools
+sudo apt install snmp snmp-mibs-downloader -y
+
+# Test SNMP connectivity
+snmpwalk -v2c -c [SNMP_COMMUNITY] 192.168.1.102 1.3.6.1.2.1.1
+
+# Test specific TGW OIDs
+snmpget -v2c -c [SNMP_COMMUNITY] 192.168.1.102 \
+         1.3.6.1.4.1.9.9.63.1.3.1.1.1  # Active calls
+snmpget -v2c -c [SNMP_COMMUNITY] 192.168.1.102 \
+         1.3.6.1.4.1.9.9.63.1.3.2.1.1  # CPU utilization
+```
+
+#### **Step 2: TGW SNMP Integration Code**
+```python
+# Create new file: TGW_SNMP_Client.py
+import pysnmp.hlapi as snmp
+from typing import Dict, List, Optional
+import logging
+
+class TGWSNMPClient:
+    """SNMP client for Cisco Telephony Gateway monitoring"""
+    
+    def __init__(self, host: str, community: str, port: int = 161):
+        self.host = host
+        self.community = community
+        self.port = port
+        self.logger = logging.getLogger(__name__)
+    
+    def get_snmp_data(self, oid: str) -> Optional[str]:
+        """Get SNMP data for specific OID"""
+        try:
+            error_indication, error_status, error_index, var_binds = next(
+                snmp.getCmd(
+                    snmp.SnmpEngine(),
+                    snmp.CommunityData(self.community, mpModel=0),
+                    snmp.UdpTransportTarget((self.host, self.port)),
+                    snmp.ContextData(),
+                    snmp.ObjectType(snmp.ObjectIdentity(oid))
+                )
+            )
+            
+            if error_indication:
+                self.logger.error(f"SNMP error: {error_indication}")
+                return None
+            
+            for var_bind in var_binds:
+                return str(var_bind[1])
+                
+        except Exception as e:
+            self.logger.error(f"SNMP query failed: {str(e)}")
+            return None
+    
+    def get_active_calls(self) -> int:
+        """Get number of active calls"""
+        oid = "1.3.6.1.4.1.9.9.63.1.3.1.1.1"
+        value = self.get_snmp_data(oid)
+        return int(value) if value else 0
+    
+    def get_cpu_utilization(self) -> float:
+        """Get CPU utilization percentage"""
+        oid = "1.3.6.1.4.1.9.9.63.1.3.2.1.1"
+        value = self.get_snmp_data(oid)
+        return float(value) if value else 0.0
+    
+    def get_memory_utilization(self) -> float:
+        """Get memory utilization percentage"""
+        oid = "1.3.6.1.4.1.9.9.63.1.3.2.1.2"
+        value = self.get_snmp_data(oid)
+        return float(value) if value else 0.0
+    
+    def get_all_metrics(self) -> Dict[str, any]:
+        """Get all TGW metrics"""
+        return {
+            "active_calls": self.get_active_calls(),
+            "cpu_utilization": self.get_cpu_utilization(),
+            "memory_utilization": self.get_memory_utilization(),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+```
+
+### **SBC (Session Border Controller) Integration**
+
+#### **Step 1: SSH Configuration**
+```bash
+# Test SSH connectivity
+ssh admin@192.168.1.103 "show version"
+
+# Set up SSH key authentication
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/sbc_key
+ssh-copy-id -i ~/.ssh/sbc_key.pub admin@192.168.1.103
+```
+
+#### **Step 2: SBC SSH Integration Code**
+```python
+# Create new file: SBC_SSH_Client.py
+import paramiko
+from typing import Dict, List, Optional
+import logging
+from datetime import datetime
+
+class SBCSSHClient:
+    """SSH client for Cisco Session Border Controller monitoring"""
+    
+    def __init__(self, host: str, username: str, password: str, port: int = 22):
+        self.host = host
+        self.username = username
+        self.password = password
+        self.port = port
+        self.logger = logging.getLogger(__name__)
+        self.client = None
+    
+    def connect(self) -> bool:
+        """Establish SSH connection"""
+        try:
+            self.client = paramiko.SSHClient()
+            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            self.client.connect(
+                hostname=self.host,
+                port=self.port,
+                username=self.username,
+                password=self.password,
+                timeout=10
+            )
+            return True
+        except Exception as e:
+            self.logger.error(f"SSH connection failed: {str(e)}")
+            return False
+    
+    def execute_command(self, command: str) -> Optional[str]:
+        """Execute command via SSH"""
+        if not self.client:
+            if not self.connect():
+                return None
+        
+        try:
+            stdin, stdout, stderr = self.client.exec_command(command)
+            output = stdout.read().decode('utf-8').strip()
+            error = stderr.read().decode('utf-8').strip()
+            
+            if error:
+                self.logger.warning(f"SSH command warning: {error}")
+            
+            return output
+        except Exception as e:
+            self.logger.error(f"SSH command failed: {str(e)}")
+            return None
+    
+    def get_active_sessions(self) -> int:
+        """Get number of active sessions"""
+        command = "show sipd active sessions count"
+        output = self.execute_command(command)
+        
+        if output:
+            # Parse output to extract session count
+            lines = output.split('\n')
+            for line in lines:
+                if 'Active sessions:' in line:
+                    return int(line.split(':')[1].strip())
+        return 0
+    
+    def get_cpu_utilization(self) -> float:
+        """Get CPU utilization"""
+        command = "show process cpu | include CPU"
+        output = self.execute_command(command)
+        
+        if output:
+            # Parse CPU percentage from output
+            lines = output.split('\n')
+            for line in lines:
+                if '%' in line:
+                    return float(line.split('%')[0].strip())
+        return 0.0
+    
+    def get_memory_utilization(self) -> float:
+        """Get memory utilization"""
+        command = "show process memory | include Memory"
+        output = self.execute_command(command)
+        
+        if output:
+            # Parse memory percentage from output
+            lines = output.split('\n')
+            for line in lines:
+                if '%' in line and 'Memory' in line:
+                    return float(line.split('%')[0].strip())
+        return 0.0
+    
+    def get_all_metrics(self) -> Dict[str, any]:
+        """Get all SBC metrics"""
+        return {
+            "active_sessions": self.get_active_sessions(),
+            "cpu_utilization": self.get_cpu_utilization(),
+            "memory_utilization": self.get_memory_utilization(),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    def disconnect(self):
+        """Close SSH connection"""
+        if self.client:
+            self.client.close()
+            self.client = None
+```
+
+---
+
+## 🔧 **SSH vs SNMP Configuration**
+
+### **SSH Configuration (Preferred for SBC)**
+
+#### **Advantages:**
+- Secure encrypted communication
+- Full command access
+- Real-time data retrieval
+- Detailed system information
+- Better error handling
+
+#### **Configuration Steps:**
+```bash
+# 1. Enable SSH on SBC
+# Connect to SBC console and run:
+configure terminal
+ssh server enable
+ssh server algorithm encryption aes128-cbc aes192-cbc aes256-cbc
+ssh server algorithm hmac hmac-sha1 hmac-sha256
+exit
+
+# 2. Create monitoring user
+configure terminal
+username monitoring password [STRONG_PASSWORD] role network-operator
+exit
+
+# 3. Configure SSH access lists
+configure terminal
+ip access-list extended SSH_ACCESS
+permit tcp host [MONITORING_SERVER_IP] any eq 22
+deny tcp any any eq 22
+permit ip any any
+exit
+
+# 4. Apply access list to SSH
+line vty 0 4
+access-class SSH_ACCESS in
+transport input ssh
+exit
+```
+
+### **SNMP Configuration (Preferred for TGW)**
+
+#### **Advantages:**
+- Lightweight protocol
+- Standardized interface
+- Low overhead
+- Fast polling
+- Wide tool support
+
+#### **Configuration Steps:**
+```bash
+# 1. Enable SNMP on TGW
+# Connect to TGW console and run:
+configure terminal
+snmp-server community [COMMUNITY_NAME] ro
+snmp-server location "Data Center Rack 1"
+snmp-server contact "Network Team"
+exit
+
+# 2. Configure SNMP access lists
+configure terminal
+snmp-server access-list SNMP_ACCESS
+ip access-list standard SNMP_ACCESS
+permit [MONITORING_SERVER_IP]
+deny any
+exit
+
+# 3. Enable SNMP traps (optional)
+configure terminal
+snmp-server enable traps
+snmp-server host [MONITORING_SERVER_IP] version 2c [COMMUNITY_NAME]
+exit
+```
+
+### **Configuration Comparison**
+
+| Feature | SSH | SNMP |
+|---------|-----|------|
+| Security | High (encrypted) | Medium (community string) |
+| Data Access | Full command access | Limited to SNMP OIDs |
+| Performance | Medium (connection overhead) | High (lightweight) |
+| Complexity | Higher | Lower |
+| Use Case | SBC (complex data) | TGW (simple metrics) |
+
+---
+
+## 🛠️ **Code Improvements**
+
+### **1. Enhanced Error Handling**
+```python
+# Update proxy-gateway/main.py
+import asyncio
+from typing import Dict, Any, Optional
+import backoff
+
+class EnhancedDataCollector:
+    """Enhanced data collector with retry logic and error handling"""
+    
+    @backoff.on_exception(backoff.expo,
+                         (requests.exceptions.RequestException,
+                          requests.exceptions.Timeout,
+                          requests.exceptions.ConnectionError),
+                         max_tries=3,
+                         max_time=60)
+    async def collect_metrics_with_retry(self, url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
+        """Collect metrics with exponential backoff retry"""
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+                async with session.get(url) as response:
+                    if response.status == 200:
+                        return await response.json()
+                    else:
+                        self.logger.error(f"HTTP {response.status} from {url}")
+                        return None
+        except Exception as e:
+            self.logger.error(f"Failed to collect metrics from {url}: {str(e)}")
+            raise
+    
+    async def collect_all_metrics(self) -> Dict[str, Any]:
+        """Collect metrics from all sources with error handling"""
+        results = {}
+        
+        # Collect from UCCX
+        try:
+            results['uccx'] = await self.collect_metrics_with_retry(
+                f"{self.uccx_url}/api/uccx/stats"
+            )
+        except Exception as e:
+            self.logger.error(f"UCCX collection failed: {str(e)}")
+            results['uccx'] = {"error": str(e), "timestamp": datetime.utcnow().isoformat()}
+        
+        # Collect from CUCM
+        try:
+            results['cucm'] = await self.collect_metrics_with_retry(
+                f"{self.cucm_url}/api/cucm/system/stats"
+            )
+        except Exception as e:
+            self.logger.error(f"CUCM collection failed: {str(e)}")
+            results['cucm'] = {"error": str(e), "timestamp": datetime.utcnow().isoformat()}
+        
+        # Collect from TGW
+        try:
+            results['tgw'] = await self.collect_tgw_metrics()
+        except Exception as e:
+            self.logger.error(f"TGW collection failed: {str(e)}")
+            results['tgw'] = {"error": str(e), "timestamp": datetime.utcnow().isoformat()}
+        
+        # Collect from SBC
+        try:
+            results['sbc'] = await self.collect_sbc_metrics()
+        except Exception as e:
+            self.logger.error(f"SBC collection failed: {str(e)}")
+            results['sbc'] = {"error": str(e), "timestamp": datetime.utcnow().isoformat()}
+        
+        return results
+```
+
+### **2. Production Configuration Management**
+```python
+# Create config/production.py
+from pydantic import BaseSettings, validator
+from typing import List, Optional
+import os
+
+class ProductionConfig(BaseSettings):
+    """Production configuration with validation"""
+    
+    # Database Configuration
+    postgres_user: str
+    postgres_password: str
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    
+    # Cisco Component Configuration
+    cucm_host: str
+    cucm_username: str
+    cucm_password: str
+    cucm_port: int = 443
+    cucm_verify_ssl: bool = False
+    
+    uccx_host: str
+    uccx_username: str
+    uccx_password: str
+    uccx_port: int = 443
+    uccx_verify_ssl: bool = False
+    
+    # TGW Configuration
+    tgw_host: str
+    tgw_snmp_community: str
+    tgw_snmp_port: int = 161
+    tgw_snmp_version: str = "2c"
+    tgw_snmp_timeout: int = 5
+    
+    # SBC Configuration
+    sbc_host: str
+    sbc_username: str
+    sbc_password: str
+    sbc_port: int = 443
+    sbc_verify_ssl: bool = False
+    
+    # Application Configuration
+    enable_polling: bool = True
+    polling_interval: int = 60
+    request_timeout: int = 10
+    log_level: str = "INFO"
+    
+    @validator('postgres_password')
+    def validate_password_strength(cls, v):
+        if len(v) < 12:
+            raise ValueError('Password must be at least 12 characters')
+        return v
+    
+    @validator('cucm_host', 'uccx_host', 'tgw_host', 'sbc_host')
+    def validate_ip_address(cls, v):
+        import ipaddress
+        try:
+            ipaddress.ip_address(v)
+        except ValueError:
+            raise ValueError(f'Invalid IP address: {v}')
+        return v
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
+```
+
+### **3. Enhanced Logging**
+```python
+# Create logging_config.py
+import logging
+import logging.config
+from pathlib import Path
+
+def setup_production_logging():
+    """Setup production logging configuration"""
+    
+    log_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "detailed": {
+                "format": "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s",
+                "datefmt": "%Y-%m-%d %H:%M:%S"
+            },
+            "json": {
+                "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
+                "format": "%(asctime)s %(name)s %(levelname)s %(message)s"
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": "INFO",
+                "formatter": "detailed",
+                "stream": "ext://sys.stdout"
+            },
+            "file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "DEBUG",
+                "formatter": "json",
+                "filename": "/app/logs/telephony-monitoring.log",
+                "maxBytes": 10485760,  # 10MB
+                "backupCount": 5
+            },
+            "error_file": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "ERROR",
+                "formatter": "json",
+                "filename": "/app/logs/telephony-monitoring-error.log",
+                "maxBytes": 10485760,  # 10MB
+                "backupCount": 5
+            }
+        },
+        "loggers": {
+            "": {
+                "level": "INFO",
+                "handlers": ["console", "file", "error_file"],
+                "propagate": False
+            },
+            "uvicorn": {
+                "level": "INFO",
+                "handlers": ["console", "file"],
+                "propagate": False
+            },
+            "sqlalchemy": {
+                "level": "WARNING",
+                "handlers": ["file"],
+                "propagate": False
+            }
+        }
+    }
+    
+    # Create log directory
+    Path("/app/logs").mkdir(exist_ok=True)
+    
+    # Apply configuration
+    logging.config.dictConfig(log_config)
+```
+
+---
+
+## 🚀 **Production Optimization**
+
+### **1. Performance Tuning**
+```yaml
+# docker-compose.prod.yml performance optimizations
+version: '3.8'
+
+services:
+  proxy-gateway:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    environment:
+      - WORKERS=4
+      - MAX_CONNECTIONS=100
+      - KEEP_ALIVE=2
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+      --tcp-keepalive 60
+      --timeout 0
+
+  postgres:
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+    environment:
+      - POSTGRES_SHARED_PRELOAD_LIBRARIES=pg_stat_statements
+      - POSTGRES_MAX_CONNECTIONS=200
+      - POSTGRES_SHARED_BUFFERS=256MB
+      - POSTGRES_EFFECTIVE_CACHE_SIZE=1GB
+      - POSTGRES_WORK_MEM=4MB
+      - POSTGRES_MAINTENANCE_WORK_MEM=64MB
+```
+
+### **2. Database Optimization**
+```sql
+-- Create indexes for performance
+CREATE INDEX CONCURRENTLY idx_telephony_metrics_timestamp 
+ON telephony_metrics (timestamp DESC);
+
+CREATE INDEX CONCURRENTLY idx_telephony_metrics_server_type_timestamp 
+ON telephony_metrics (server_type, timestamp DESC);
+
+CREATE INDEX CONCURRENTLY idx_telephony_metrics_server_name_timestamp 
+ON telephony_metrics (server_name, timestamp DESC);
+
+-- Partitioning for large datasets (optional)
+CREATE TABLE telephony_metrics_y2024m01 PARTITION OF telephony_metrics
+FOR VALUES FROM ('2024-01-01') TO ('2024-02-01');
+
+-- Materialized views for common queries
+CREATE MATERIALIZED VIEW mv_current_metrics AS
+SELECT 
+    server_type,
+    server_name,
+    metric_name,
+    metric_value,
+    unit,
+    timestamp
+FROM telephony_metrics 
+WHERE timestamp >= NOW() - INTERVAL '1 hour'
+ORDER BY timestamp DESC;
+
+-- Refresh materialized view
+CREATE OR REPLACE FUNCTION refresh_current_metrics()
+RETURNS void AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_current_metrics;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+### **3. Caching Strategy**
+```python
+# Enhanced caching with Redis
+import redis
+import json
+from typing import Optional, Any
+from datetime import timedelta
+
+class ProductionCache:
+    """Production-ready caching with Redis"""
+    
+    def __init__(self, redis_client: redis.Redis):
+        self.redis = redis_client
+        self.default_ttl = 300  # 5 minutes
+    
+    async def get_cached_metrics(self, key: str) -> Optional[Any]:
+        """Get cached metrics"""
+        try:
+            data = self.redis.get(key)
+            if data:
+                return json.loads(data)
+        except Exception as e:
+            logging.error(f"Cache get error: {str(e)}")
+        return None
+    
+    async def cache_metrics(self, key: str, data: Any, ttl: Optional[int] = None) -> bool:
+        """Cache metrics with TTL"""
+        try:
+            ttl = ttl or self.default_ttl
+            serialized = json.dumps(data, default=str)
+            return self.redis.setex(key, ttl, serialized)
+        except Exception as e:
+            logging.error(f"Cache set error: {str(e)}")
+            return False
+    
+    async def invalidate_pattern(self, pattern: str) -> int:
+        """Invalidate cache keys by pattern"""
+        try:
+            keys = self.redis.keys(pattern)
+            if keys:
+                return self.redis.delete(*keys)
+        except Exception as e:
+            logging.error(f"Cache invalidation error: {str(e)}")
+        return 0
+```
+
+---
+
+## 📊 **Monitoring & Maintenance**
+
+### **1. Health Check Endpoints**
+```python
+# Enhanced health checks
+from fastapi import FastAPI, HTTPException
+from typing import Dict, Any
+import asyncio
+
+app = FastAPI()
+
+@app.get("/health/detailed")
+async def detailed_health_check() -> Dict[str, Any]:
+    """Comprehensive health check"""
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": {},
+        "metrics": {}
+    }
+    
+    # Check database connectivity
+    try:
+        db_status = await check_database_health()
+        health_status["services"]["database"] = db_status
+    except Exception as e:
+        health_status["services"]["database"] = {"status": "unhealthy", "error": str(e)}
+        health_status["status"] = "unhealthy"
+    
+    # Check Redis connectivity
+    try:
+        redis_status = await check_redis_health()
+        health_status["services"]["redis"] = redis_status
+    except Exception as e:
+        health_status["services"]["redis"] = {"status": "unhealthy", "error": str(e)}
+        health_status["status"] = "unhealthy"
+    
+    # Check Cisco component connectivity
+    try:
+        cisco_status = await check_cisco_connectivity()
+        health_status["services"]["cisco"] = cisco_status
+    except Exception as e:
+        health_status["services"]["cisco"] = {"status": "unhealthy", "error": str(e)}
+    
+    # Check system metrics
+    try:
+        system_metrics = await get_system_metrics()
+        health_status["metrics"] = system_metrics
+    except Exception as e:
+        health_status["metrics"] = {"error": str(e)}
+    
+    return health_status
+
+async def check_database_health() -> Dict[str, Any]:
+    """Check database connectivity and performance"""
+    # Implementation for database health check
+    pass
+
+async def check_redis_health() -> Dict[str, Any]:
+    """Check Redis connectivity"""
+    # Implementation for Redis health check
+    pass
+
+async def check_cisco_connectivity() -> Dict[str, Any]:
+    """Check Cisco component connectivity"""
+    # Implementation for Cisco connectivity check
+    pass
+
+async def get_system_metrics() -> Dict[str, Any]:
+    """Get system performance metrics"""
+    # Implementation for system metrics
+    pass
+```
+
+### **2. Automated Maintenance**
+```bash
+#!/bin/bash
+# maintenance.sh - Automated maintenance script
+
+# Log rotation
+logrotate() {
+    echo "Rotating logs..."
+    docker-compose exec proxy-gateway logrotate /etc/logrotate.d/telephony-monitoring
+}
+
+# Database maintenance
+database_maintenance() {
+    echo "Performing database maintenance..."
+    
+    # Vacuum and analyze tables
+    docker-compose exec postgres psql -U telephony_user -d cucm_db -c "VACUUM ANALYZE;"
+    docker-compose exec postgres psql -U telephony_user -d uccx_db -c "VACUUM ANALYZE;"
+    
+    # Update statistics
+    docker-compose exec postgres psql -U telephony_user -d cucm_db -c "ANALYZE;"
+    docker-compose exec postgres psql -U telephony_user -d uccx_db -c "ANALYZE;"
+    
+    # Refresh materialized views
+    docker-compose exec postgres psql -U telephony_user -d cucm_db -c "SELECT refresh_current_metrics();"
+}
+
+# Cache cleanup
+cache_cleanup() {
+    echo "Cleaning up Redis cache..."
+    docker-compose exec redis redis-cli FLUSHDB
+}
+
+# Health check
+health_check() {
+    echo "Performing health check..."
+    curl -f http://localhost:8000/health/detailed || exit 1
+}
+
+# Backup
+backup() {
+    echo "Creating backup..."
+    ./backup.sh
+}
+
+# Main execution
+case "$1" in
+    logrotate)
+        logrotate
+        ;;
+    database)
+        database_maintenance
+        ;;
+    cache)
+        cache_cleanup
+        ;;
+    health)
+        health_check
+        ;;
+    backup)
+        backup
+        ;;
+    all)
+        logrotate
+        database_maintenance
+        cache_cleanup
+        health_check
+        backup
+        ;;
+    *)
+        echo "Usage: $0 {logrotate|database|cache|health|backup|all}"
+        exit 1
+        ;;
+esac
+
+echo "Maintenance completed successfully!"
+```
+
+### **3. Monitoring Dashboard**
+```python
+# monitoring.py - Production monitoring
+from prometheus_client import Counter, Histogram, Gauge, generate_latest
+from fastapi import FastAPI, Response
+import time
+
+# Prometheus metrics
+REQUEST_COUNT = Counter('telephony_requests_total', 'Total requests', ['method', 'endpoint'])
+REQUEST_DURATION = Histogram('telephony_request_duration_seconds', 'Request duration')
+ACTIVE_CONNECTIONS = Gauge('telephony_active_connections', 'Active connections')
+METRICS_COLLECTED = Counter('telephony_metrics_collected_total', 'Metrics collected', ['component'])
+
+@app.middleware("http")
+async def monitor_requests(request, call_next):
+    """Monitor HTTP requests"""
+    start_time = time.time()
+    
+    response = await call_next(request)
+    
+    duration = time.time() - start_time
+    REQUEST_COUNT.labels(method=request.method, endpoint=request.url.path).inc()
+    REQUEST_DURATION.observe(duration)
+    
+    return response
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Prometheus metrics endpoint"""
+    return Response(generate_latest(), media_type="text/plain")
+
+# Custom metrics collection
+async def update_custom_metrics():
+    """Update custom application metrics"""
+    # Update active connections
+    ACTIVE_CONNECTIONS.set(get_active_connections())
+    
+    # Update metrics collected
+    for component in ['uccx', 'cucm', 'tgw', 'sbc']:
+        METRICS_COLLECTED.labels(component=component).inc(get_metrics_count(component))
+```
+
+---
+
+## 🔧 **Troubleshooting**
+
+### **Common Issues and Solutions**
+
+#### **1. Service Startup Failures**
+```bash
+# Check service status
+docker-compose -f docker-compose.prod.yml ps
+
+# Check service logs
+docker-compose -f docker-compose.prod.yml logs [service_name]
+
+# Common startup issues:
+# - Port conflicts: Check if ports 8000-8002 are available
+# - Database connection: Verify PostgreSQL is running
+# - Network issues: Check Docker network configuration
+```
+
+#### **2. Database Connection Issues**
+```bash
+# Test database connectivity
+docker-compose exec postgres psql -U telephony_user -d cucm_db -c "SELECT 1;"
+
+# Check database logs
+docker-compose logs postgres
+
+# Common database issues:
+# - Incorrect credentials in .env file
+# - Database not initialized
+# - Network connectivity issues
+```
+
+#### **3. Cisco Component Connectivity**
+```bash
+# Test network connectivity
+ping [CISCO_COMPONENT_IP]
+telnet [CISCO_COMPONENT_IP] [PORT]
+
+# Test API access
+curl -k -u "username:password" "https://[CISCO_IP]:8443/axl/"
+
+# Common Cisco issues:
+# - Incorrect credentials
+# - SSL certificate issues
+# - Network firewall blocking
+# - Service not running on Cisco component
+```
+
+#### **4. Performance Issues**
+```bash
+# Check system resources
+docker stats
+top
+htop
+
+# Check database performance
+docker-compose exec postgres psql -U telephony_user -d cucm_db -c "SELECT * FROM pg_stat_activity;"
+
+# Common performance issues:
+# - Insufficient memory/CPU
+# - Database query optimization
+# - Network latency
+# - Too many concurrent connections
+```
+
+#### **5. Memory Issues**
+```bash
+# Check memory usage
+free -h
+docker stats --no-stream
+
+# Clean up Docker
+docker system prune -a
+docker volume prune
+
+# Common memory issues:
+# - Memory leaks in applications
+# - Insufficient allocated memory
+# - Database memory usage
+# - Cache buildup
+```
+
+### **Emergency Procedures**
+
+#### **Service Recovery**
+```bash
+# Emergency restart
+docker-compose -f docker-compose.prod.yml restart [service_name]
+
+# Full system restart
+docker-compose -f docker-compose.prod.yml down
+docker-compose -f docker-compose.prod.yml up -d
+
+# Database recovery
+docker-compose exec postgres pg_dump -U telephony_user cucm_db > backup.sql
+docker-compose exec postgres psql -U telephony_user cucm_db < backup.sql
+```
+
+#### **Data Recovery**
+```bash
+# Restore from backup
+./restore.sh [backup_file]
+
+# Manual data recovery
+docker-compose exec postgres psql -U telephony_user -d cucm_db -c "SELECT COUNT(*) FROM telephony_metrics;"
+```
+
+---
+
+## 📝 **Conclusion**
+
+This comprehensive deployment guide provides everything needed to successfully deploy the Cisco Telephony Monitoring System in a production environment using ESXi 6.7. The system is designed to be:
+
+- **Scalable**: Microservices architecture supporting horizontal scaling
+- **Reliable**: Built-in redundancy and failover capabilities  
+- **Secure**: Enterprise-grade security with encrypted communications
+- **Maintainable**: Comprehensive logging, monitoring, and maintenance procedures
+- **Production-Ready**: Optimized for performance and stability
+
+The deployment process includes:
+1. **Server Preparation** - ESXi 6.7 configuration and VM setup
+2. **Application Packaging** - TAR file creation and transfer
+3. **Service Deployment** - Docker Compose orchestration
+4. **Cisco Integration** - Multi-protocol connectivity (SSH/SNMP)
+5. **Monitoring Setup** - Comprehensive health monitoring
+6. **Maintenance Procedures** - Automated maintenance and backup
+
+With this guide, you can successfully deploy and manage a production-grade telephony monitoring system that provides real-time insights into your Cisco telephony infrastructure.
+
+---
+
+## 🎯 **Next Steps**
+
+1. **Deploy the System**: Follow the deployment steps in order
+2. **Configure Cisco Components**: Set up SSH/SNMP access
+3. **Test Connectivity**: Verify all components are communicating
+4. **Monitor Performance**: Set up monitoring and alerting
+5. **Establish Maintenance**: Configure automated maintenance procedures
+
+For additional support or questions, refer to the troubleshooting section or contact the system administrator.
 
 ---
 
