@@ -1,0 +1,17 @@
+.env
+.env.*
+!*.env.example
+!*.env.*.example
+config/.env.*
+!config/.env.*.example
+**/__pycache__/
+**/*.pyc
+**/*.log
+*.pem
+*.key
+*.p12
+*.pfx
+.venv/
+venv/
+*.db
+*.sqlite3

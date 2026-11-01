@@ -4713,3 +4713,9 @@ This comprehensive Cisco Telephony Monitoring System provides a robust, scalable
 5. **Enhancement**: Implement advanced features as requirements evolve
 
 This system provides a solid foundation for enterprise telephony monitoring that can grow and evolve with organizational needs while maintaining high standards of reliability, security, and performance.
+
+## Security update: externalized configuration
+
+This repository no longer tracks `config/.env.development` or `config/.env.production`. For local setup, copy `config/.env.development.example` to `config/.env.development`. For a real deployment, provision `config/.env.production` from an authorized secret manager or private operator-controlled location. The example templates intentionally use inert placeholders and are **not deployable without configuration**.
+
+The old files remain in public Git history and potentially prior clones. Any **confirmed active** passwords, tokens, SNMP communities or API secrets appearing there must be rotated; a HEAD deletion does not revoke credentials or rewrite history. Review Docker Compose `env_file` paths and deployment packaging before rollout; do not rely on Git-tracked .env files.
